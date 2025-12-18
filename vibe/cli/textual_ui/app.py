@@ -12,7 +12,7 @@ from textual.events import MouseUp
 from textual.widget import Widget
 from textual.widgets import Static
 
-from vibe.cli.clipboard import copy_selection_to_clipboard
+from vibe.cli.clipboard import copy_selection_to_clipboard, get_image_from_clipboard
 from vibe.cli.commands import CommandRegistry
 from vibe.cli.textual_ui.handlers.event_handler import EventHandler
 from vibe.cli.textual_ui.widgets.approval_app import ApprovalApp
@@ -48,7 +48,13 @@ from vibe.core.autocompletion.path_prompt_adapter import render_path_prompt
 from vibe.core.config import VibeConfig
 from vibe.core.config_path import HISTORY_FILE
 from vibe.core.tools.base import BaseToolConfig, ToolPermission
-from vibe.core.types import ApprovalResponse, LLMMessage, ResumeSessionInfo, Role
+from vibe.core.types import (
+    ApprovalResponse,
+    ImageContent,
+    LLMMessage,
+    ResumeSessionInfo,
+    Role,
+)
 from vibe.core.utils import (
     CancellationReason,
     get_user_cancellation_message,
@@ -76,6 +82,12 @@ class VibeApp(App):
         Binding("shift+up", "scroll_chat_up", "Scroll Up", show=False, priority=True),
         Binding(
             "shift+down", "scroll_chat_down", "Scroll Down", show=False, priority=True
+        ),
+        Binding(
+            "ctrl+shift+v", "paste_image", "Paste Image", show=False, priority=True
+        ),
+        Binding(
+            "ctrl+shift+x", "clear_images", "Clear Images", show=False, priority=True
         ),
     ]
 
@@ -202,7 +214,9 @@ class VibeApp(App):
         self, event: ChatInputContainer.Submitted
     ) -> None:
         value = event.value.strip()
-        if not value:
+        images = event.images if event.images else None
+
+        if not value and not images:
             return
 
         input_widget = self.query_one(ChatInputContainer)
@@ -218,7 +232,7 @@ class VibeApp(App):
         if await self._handle_command(value):
             return
 
-        await self._handle_user_message(value)
+        await self._handle_user_message(value, images=images)
 
     async def on_approval_app_approval_granted(
         self, message: ApprovalApp.ApprovalGranted
@@ -358,16 +372,30 @@ class VibeApp(App):
                 ErrorMessage(f"Command failed: {e}", collapsed=self._tools_collapsed)
             )
 
-    async def _handle_user_message(self, message: str) -> None:
+    async def _handle_user_message(
+        self, message: str, images: list[ImageContent] | None = None
+    ) -> None:
         init_task = self._ensure_agent_init_task()
         pending_init = bool(init_task and not init_task.done())
-        user_message = UserMessage(message, pending=pending_init)
+
+        # Create display message with image indicator if images are attached
+        display_message = message
+        if images:
+            image_count = len(images)
+            display_message = (
+                f"[📎 {image_count} image(s)]\n{message}"
+                if message
+                else f"[📎 {image_count} image(s)]"
+            )
+
+        user_message = UserMessage(display_message, pending=pending_init)
 
         await self._mount_and_scroll(user_message)
 
         self.run_worker(
             self._process_user_message_after_mount(
                 message=message,
+                images=images,
                 user_message=user_message,
                 init_task=init_task,
                 pending_init=pending_init,
@@ -378,6 +406,7 @@ class VibeApp(App):
     async def _process_user_message_after_mount(
         self,
         message: str,
+        images: list[ImageContent] | None,
         user_message: UserMessage,
         init_task: asyncio.Task | None,
         pending_init: bool,
@@ -404,7 +433,9 @@ class VibeApp(App):
                 return
 
             if self.agent and not self._agent_running:
-                self._agent_task = asyncio.create_task(self._handle_agent_turn(message))
+                self._agent_task = asyncio.create_task(
+                    self._handle_agent_turn(message, images=images)
+                )
         except asyncio.CancelledError:
             self._agent_init_interrupted = False
             if pending_init:
@@ -475,7 +506,9 @@ class VibeApp(App):
         self._pending_approval = None
         return result
 
-    async def _handle_agent_turn(self, prompt: str) -> None:
+    async def _handle_agent_turn(
+        self, prompt: str, images: list[ImageContent] | None = None
+    ) -> None:
         if not self.agent:
             return
 
@@ -491,7 +524,7 @@ class VibeApp(App):
             rendered_prompt = render_path_prompt(
                 prompt, base_dir=self.config.effective_workdir
             )
-            async for event in self.agent.act(rendered_prompt):
+            async for event in self.agent.act(rendered_prompt, images=images):
                 if self._context_progress and self.agent:
                     current_state = self._context_progress.tokens
                     self._context_progress.tokens = TokenState(
@@ -998,6 +1031,37 @@ class VibeApp(App):
             chat.scroll_relative(y=5, animate=False)
             if self._is_scrolled_to_bottom(chat):
                 self._auto_scroll = True
+        except Exception:
+            pass
+
+    def action_paste_image(self) -> None:
+        """Paste an image from the clipboard."""
+        if self._current_bottom_app != BottomApp.Input:
+            return
+
+        image = get_image_from_clipboard()
+        if image:
+            try:
+                chat_input = self.query_one(ChatInputContainer)
+                chat_input.attach_image_with_placeholder(image)
+                self.notify(
+                    "Image pasted from clipboard", severity="information", timeout=2
+                )
+            except Exception:
+                self.notify("Failed to paste image", severity="warning", timeout=2)
+        else:
+            self.notify("No image found in clipboard", severity="warning", timeout=2)
+
+    def action_clear_images(self) -> None:
+        """Clear all attached images."""
+        if self._current_bottom_app != BottomApp.Input:
+            return
+
+        try:
+            chat_input = self.query_one(ChatInputContainer)
+            if chat_input.has_images:
+                chat_input.clear_images()
+                self.notify("Images cleared", severity="information", timeout=2)
         except Exception:
             pass
 

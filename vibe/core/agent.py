@@ -44,6 +44,7 @@ from vibe.core.types import (
     BaseEvent,
     CompactEndEvent,
     CompactStartEvent,
+    ImageContent,
     LLMChunk,
     LLMMessage,
     Role,
@@ -159,9 +160,11 @@ class Agent:
             self.message_observer(msg)
         self._last_observed_message_index = len(self.messages)
 
-    async def act(self, msg: str) -> AsyncGenerator[BaseEvent]:
+    async def act(
+        self, msg: str, images: list[ImageContent] | None = None
+    ) -> AsyncGenerator[BaseEvent]:
         self._clean_message_history()
-        async for event in self._conversation_loop(msg):
+        async for event in self._conversation_loop(msg, images=images):
             yield event
 
     def _setup_middleware(self, max_turns: int | None, max_price: float | None) -> None:
@@ -231,8 +234,12 @@ class Agent:
             messages=self.messages, stats=self.stats, config=self.config
         )
 
-    async def _conversation_loop(self, user_msg: str) -> AsyncGenerator[BaseEvent]:
-        self.messages.append(LLMMessage(role=Role.user, content=user_msg))
+    async def _conversation_loop(
+        self, user_msg: str, images: list[ImageContent] | None = None
+    ) -> AsyncGenerator[BaseEvent]:
+        # Create user message with optional images
+        user_message = LLMMessage(role=Role.user, content=user_msg, images=images)
+        self.messages.append(user_message)
         self.stats.steps += 1
 
         try:

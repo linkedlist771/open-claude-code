@@ -38,6 +38,7 @@ While Claude Code is a powerful coding assistant, it operates as a closed-source
 - **Native Anthropic API Support**: First-class support for Claude models via Anthropic's native API format
 - **Multi-Provider Architecture**: Supports OpenAI-compatible APIs, Anthropic, and custom providers
 - **Interactive Chat**: A conversational AI agent that understands your requests and breaks down complex tasks
+- **Image Paste Support**: Paste images directly from clipboard with `Ctrl+V` - images appear as `[image#1]` placeholders (macOS supported)
 - **Powerful Toolset**:
   - Read, write, and patch files (`read_file`, `write_file`, `search_replace`)
   - Execute shell commands in a stateful terminal (`bash`)
@@ -164,6 +165,8 @@ ccvibe
 ```
 
 - **Multi-line Input**: Press `Ctrl+J` or `Shift+Enter`
+- **Paste Images**: Press `Ctrl+V` to paste image from clipboard (粘贴图片：按 `Ctrl+V` 从剪贴板粘贴图片)
+- **Clear Images**: Press `Ctrl+Shift+X` to clear all attached images (清除图片：按 `Ctrl+Shift+X` 清除所有附加的图片)
 - **File Paths**: Reference files with `@` (e.g., `@src/main.py`)
 - **Shell Commands**: Prefix with `!` to bypass the agent (e.g., `!ls -l`)
 

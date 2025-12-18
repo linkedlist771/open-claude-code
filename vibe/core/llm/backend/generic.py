@@ -81,6 +81,7 @@ class AnthropicAdapter(APIAdapter):
     ) -> tuple[str | None, list[dict[str, Any]]]:
         """Convert messages to Anthropic format.
         Extract system prompt and convert tool calls/results.
+        Supports multimodal content with images.
         """
         system_prompt: str | None = None
         anthropic_messages: list[dict[str, Any]] = []
@@ -91,10 +92,33 @@ class AnthropicAdapter(APIAdapter):
                     system_prompt = msg.content or ""
 
                 case Role.user:
-                    anthropic_messages.append({
-                        "role": "user",
-                        "content": msg.content or "",
-                    })
+                    # Build content blocks for user message (supports images)
+                    content_blocks: list[dict[str, Any]] = []
+
+                    # Add images first if present
+                    if msg.images:
+                        for img in msg.images:
+                            content_blocks.append({
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": img.media_type,
+                                    "data": img.data,
+                                },
+                            })
+
+                    # Add text content
+                    if msg.content:
+                        content_blocks.append({"type": "text", "text": msg.content})
+
+                    # If we have content blocks, use them; otherwise use simple string
+                    if content_blocks:
+                        anthropic_messages.append({
+                            "role": "user",
+                            "content": content_blocks,
+                        })
+                    else:
+                        anthropic_messages.append({"role": "user", "content": ""})
 
                 case Role.assistant:
                     content_blocks: list[dict[str, Any]] = []
@@ -403,6 +427,29 @@ class AnthropicAdapter(APIAdapter):
 class OpenAIAdapter(APIAdapter):
     endpoint: ClassVar[str] = "/chat/completions"
 
+    def _convert_message_for_openai(self, msg: LLMMessage) -> dict[str, Any]:
+        """Convert a single LLMMessage to OpenAI format, handling images."""
+        result = msg.model_dump(exclude_none=True, exclude={"images"})
+
+        # If message has images, convert content to multimodal format
+        if msg.images and msg.role == Role.user:
+            content_parts: list[dict[str, Any]] = []
+
+            # Add images first
+            for img in msg.images:
+                content_parts.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{img.media_type};base64,{img.data}"},
+                })
+
+            # Add text content
+            if msg.content:
+                content_parts.append({"type": "text", "text": msg.content})
+
+            result["content"] = content_parts
+
+        return result
+
     def build_payload(
         self,
         model_name: str,
@@ -450,7 +497,8 @@ class OpenAIAdapter(APIAdapter):
         provider: ProviderConfig,
         api_key: str | None = None,
     ) -> PreparedRequest:
-        converted_messages = [msg.model_dump(exclude_none=True) for msg in messages]
+        # Convert messages with image support
+        converted_messages = [self._convert_message_for_openai(msg) for msg in messages]
 
         payload = self.build_payload(
             model_name, converted_messages, temperature, tools, max_tokens, tool_choice

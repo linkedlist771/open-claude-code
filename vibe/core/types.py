@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from abc import ABC
+import base64
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum, auto
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -149,6 +151,67 @@ class ToolCall(BaseModel):
     type: str = "function"
 
 
+# Image content types for multimodal messages
+class ImageContent(BaseModel):
+    """Represents an image in a message, either as base64 data or a URL."""
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["image"] = "image"
+    media_type: str  # e.g., "image/png", "image/jpeg", "image/gif", "image/webp"
+    data: str  # base64-encoded image data
+    source_path: str | None = None  # Optional: original file path for display
+
+    @classmethod
+    def from_file(cls, path: Path | str) -> ImageContent:
+        """Create ImageContent from a file path."""
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Image file not found: {path}")
+
+        # Determine media type from extension
+        extension = path.suffix.lower()
+        media_type_map = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+        }
+        media_type = media_type_map.get(extension)
+        if not media_type:
+            raise ValueError(
+                f"Unsupported image format: {extension}. "
+                f"Supported formats: {', '.join(media_type_map.keys())}"
+            )
+
+        # Read and encode the image
+        with open(path, "rb") as f:
+            data = base64.standard_b64encode(f.read()).decode("utf-8")
+
+        return cls(media_type=media_type, data=data, source_path=str(path))
+
+    @classmethod
+    def from_base64(
+        cls, data: str, media_type: str, source_path: str | None = None
+    ) -> ImageContent:
+        """Create ImageContent from base64-encoded data."""
+        return cls(media_type=media_type, data=data, source_path=source_path)
+
+
+class TextContent(BaseModel):
+    """Represents text content in a multimodal message."""
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["text"] = "text"
+    text: str
+
+
+# Union type for content parts
+ContentPart = TextContent | ImageContent
+
+
 def _content_before(v: Any) -> str:
     if isinstance(v, str):
         return v
@@ -183,6 +246,7 @@ class LLMMessage(BaseModel):
 
     role: Role
     content: Content | None = None
+    images: list[ImageContent] | None = None  # Optional list of images for multimodal
     tool_calls: list[ToolCall] | None = None
     name: str | None = None
     tool_call_id: str | None = None
@@ -197,10 +261,15 @@ class LLMMessage(BaseModel):
         return {
             "role": str(getattr(v, "role", "assistant")),
             "content": getattr(v, "content", ""),
+            "images": getattr(v, "images", None),
             "tool_calls": getattr(v, "tool_calls", None),
             "name": getattr(v, "name", None),
             "tool_call_id": getattr(v, "tool_call_id", None),
         }
+
+    def has_images(self) -> bool:
+        """Check if this message contains images."""
+        return bool(self.images)
 
 
 class LLMUsage(BaseModel):

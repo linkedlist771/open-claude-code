@@ -20,6 +20,13 @@
 
 **An open-source CLI coding assistant that reproduces Claude Code with full transparency.**
 
+
+
+
+<video src="https://github.com/user-attachments/assets/94822b51-8adb-43e3-87d2-a8b05290f3e7" width="100%" controls autoplay loop muted playsinline></video>
+
+
+
 > 🔄 **This project is a fork of [Mistral Vibe](https://github.com/mistralai/mistral-vibe)**, modified to be fully compatible with Anthropic's Claude API format. Our goal is to provide an open-source alternative that lets you see exactly how an AI coding assistant works under the hood.
 
 ## Why Open Claude Code?
